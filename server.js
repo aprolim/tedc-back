@@ -160,39 +160,49 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Evento para marcar mensajes como leídos
-  // Reemplazar el evento markMessagesAsRead existente con este:
+  // Evento para marcar mensajes como leídos cuando son VISIBLES en pantalla
+  // En el evento markMessagesAsRead del backend:
   socket.on('markMessagesAsRead', (data) => {
     const { userId, senderId, messageIds } = data;
-    console.log(`📖 Marcando mensajes como leídos: ${senderId} -> ${userId}`);
+    console.log(`📖 Usuario ${userId} marcando como leídos mensajes de ${senderId}`);
     console.log(`📋 Mensajes específicos:`, messageIds);
     
     let markedCount = 0;
     
-    // Marcar solo los mensajes específicos como leídos
+    // CORREGIDO: Solo marcar mensajes donde el senderId es el remitente original
+    // y el userId es el receptor que está leyendo
     messages.forEach(msg => {
       if (messageIds && messageIds.includes(msg.id)) {
-        // Marcar mensajes específicos
-        if (!msg.read) {
+        // Verificar que el mensaje sea del senderId y para el userId
+        if (msg.senderId === senderId && msg.receiverId === userId && !msg.read) {
           msg.read = true;
           msg.readAt = new Date();
           markedCount++;
+          console.log(`✅ Mensaje ${msg.id} marcado como leído correctamente`);
         }
-      } else if (!messageIds && msg.senderId === senderId && msg.receiverId === userId && !msg.read) {
-        // Fallback: marcar todos los mensajes no leídos de este sender (comportamiento anterior)
-        msg.read = true;
-        msg.readAt = new Date();
-        markedCount++;
       }
     });
     
     console.log(`✅ ${markedCount} mensajes marcados como leídos`);
     
-    // Notificar al remitente que sus mensajes fueron leídos
+    // Notificar al remitente original que sus mensajes fueron leídos
     io.emit('messagesRead', { 
       readerId: userId, 
       senderId,
-      messageIds: messageIds || 'all' // Indicar qué mensajes se leyeron
+      messageIds: messageIds || []
+    });
+  });
+
+  // Nuevo evento para notificar cuando un usuario está viendo el chat
+  socket.on('userViewingChat', (data) => {
+    const { userId, partnerId, isViewing } = data;
+    console.log(`👀 Usuario ${userId} ${isViewing ? 'viendo' : 'dejó de ver'} chat con ${partnerId}`);
+    
+    // Notificar al partner sobre el estado de visualización
+    socket.broadcast.emit('chatViewingStatus', {
+      userId,
+      partnerId, 
+      isViewing
     });
   });
 
