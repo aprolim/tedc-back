@@ -1,3 +1,41 @@
+COMPILADO DE ARCHIVOS 
+ 
+ 
+================================= 
+.env 
+================================= 
+ 
+PORT=3000
+NODE_ENV=development 
+================================= 
+.gitignore 
+================================= 
+ 
+node_modules
+ 
+================================= 
+package.json 
+================================= 
+ 
+{
+  "name": "tareas-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+} 
+================================= 
+server.js 
+================================= 
+ 
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -20,38 +58,10 @@ app.use(express.json());
 
 // Datos en memoria (serán reemplazados por MongoDB)
 let users = [
-  { 
-    id: 1, 
-    name: 'Administrador', 
-    role: 'admin', 
-    email: 'admin@empresa.com',
-    password: 'admin123', // ✅ AGREGADO: Password para login
-    department: 'Administración'
-  },
-  { 
-    id: 2, 
-    name: 'Juan Pérez', 
-    role: 'employee', 
-    email: 'juan@empresa.com',
-    password: 'juan123',
-    department: 'Ventas'
-  },
-  { 
-    id: 3, 
-    name: 'María García', 
-    role: 'employee', 
-    email: 'maria@empresa.com',
-    password: 'maria123',
-    department: 'Marketing'
-  },
-  { 
-    id: 4, 
-    name: 'Carlos López', 
-    role: 'employee', 
-    email: 'carlos@empresa.com',
-    password: 'carlos123',
-    department: 'IT'
-  }
+  { id: 1, name: 'Admin', role: 'admin', email: 'admin@empresa.com' },
+  { id: 2, name: 'Juan Pérez', role: 'employee', email: 'juan@empresa.com' },
+  { id: 3, name: 'María García', role: 'employee', email: 'maria@empresa.com' },
+  { id: 4, name: 'Carlos López', role: 'employee', email: 'carlos@empresa.com' }
 ];
 
 let tasks = [
@@ -95,109 +105,9 @@ let userLocations = {};
 let onlineUsers = {};
 let messageReadStatus = {};
 
-// ✅ NUEVO: Middleware para log de requests
-app.use((req, res, next) => {
-  console.log(`📍 ${req.method} ${req.path}`, req.body || '');
-  next();
-});
-
-// ✅ NUEVO: Endpoint de Login
-app.post('/api/auth/login', (req, res) => {
-  console.log('🔐 Intento de login:', req.body);
-  
-  const { email, password } = req.body;
-  
-  if (!email || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Email y contraseña son requeridos' 
-    });
-  }
-  
-  // Buscar usuario por email
-  const user = users.find(u => u.email === email);
-  
-  if (!user) {
-    console.log('❌ Usuario no encontrado:', email);
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Credenciales inválidas' 
-    });
-  }
-  
-  // ✅ Verificar contraseña (en producción usar bcrypt)
-  if (user.password !== password) {
-    console.log('❌ Contraseña incorrecta para:', email);
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Credenciales inválidas' 
-    });
-  }
-  
-  // ✅ Login exitoso
-  console.log('✅ Login exitoso:', user.name);
-  
-  // Remover password de la respuesta
-  const { password: _, ...userWithoutPassword } = user;
-  
-  res.json({
-    success: true,
-    message: 'Login exitoso',
-    user: userWithoutPassword,
-    token: `fake-jwt-token-${user.id}` // En producción usar JWT real
-  });
-});
-
-// ✅ NUEVO: Endpoint para verificar token (para futuro uso)
-app.get('/api/auth/verify', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Token no proporcionado' 
-    });
-  }
-  
-  // Verificación simple del token fake
-  const userId = token.replace('fake-jwt-token-', '');
-  const user = users.find(u => u.id === parseInt(userId));
-  
-  if (!user) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Token inválido' 
-    });
-  }
-  
-  const { password: _, ...userWithoutPassword } = user;
-  
-  res.json({
-    success: true,
-    user: userWithoutPassword
-  });
-});
-
-// ✅ NUEVO: Endpoint para logout (para futuro uso)
-app.post('/api/auth/logout', (req, res) => {
-  console.log('🚪 Logout request');
-  res.json({ 
-    success: true, 
-    message: 'Logout exitoso' 
-  });
-});
-
-// API Routes existentes
+// API Routes
 app.get('/api/users', (req, res) => {
-  // ✅ MODIFICADO: Retornar usuarios sin password
-  const usersWithoutPasswords = users
-    .filter(user => user.role === 'employee')
-    .map(user => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
-    });
-  
-  res.json(usersWithoutPasswords);
+  res.json(users.filter(user => user.role === 'employee'));
 });
 
 app.get('/api/tasks', (req, res) => {
@@ -289,6 +199,7 @@ io.on('connection', (socket) => {
   });
 
   // Evento para marcar mensajes como leídos cuando son VISIBLES en pantalla
+  // En el evento markMessagesAsRead del backend:
   socket.on('markMessagesAsRead', (data) => {
     const { userId, senderId, messageIds } = data;
     console.log(`📖 Usuario ${userId} marcando como leídos mensajes de ${senderId}`);
@@ -389,27 +300,10 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ✅ NUEVO: Endpoint para obtener información de usuarios (para login)
-app.get('/api/auth/users-info', (req, res) => {
-  // Retornar información básica de usuarios para mostrar en login
-  const usersInfo = users.map(user => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    department: user.department
-  }));
-  
-  res.json(usersInfo);
-});
-
 // Ruta de prueba para ver todos los datos
 app.get('/api/debug', (req, res) => {
   res.json({
-    users: users.map(user => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
-    }),
+    users,
     tasks,
     messages,
     userLocations,
@@ -431,15 +325,10 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-  console.log(`🔐 Sistema de login ACTIVADO`);
   console.log(`📊 Usuarios: ${users.length}`);
   console.log(`📋 Tareas: ${tasks.length}`);
   console.log(`💬 Mensajes: ${messages.length}`);
   console.log(`🌍 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🔧 Debug: http://localhost:${PORT}/api/debug`);
-  console.log(`🔑 Credenciales de prueba:`);
-  console.log(`   👑 Admin: admin@empresa.com / admin123`);
-  console.log(`   👨‍💼 Juan: juan@empresa.com / juan123`);
-  console.log(`   👩‍💼 María: maria@empresa.com / maria123`);
-  console.log(`   👨‍💻 Carlos: carlos@empresa.com / carlos123`);
-});
+}); 
+Total archivos: 4 
