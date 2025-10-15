@@ -202,45 +202,67 @@ app.get('/api/users', (req, res) => {
   res.json(usersWithoutPasswords);
 });
 
-// ✅ CORREGIDO: Endpoint GET /api/tasks - MEJORADO PARA DEBUG
+// ✅ CORREGIDO: Endpoint GET /api/tasks - MEJORADO PARA NORMALIZAR TIPOS
 app.get('/api/tasks', (req, res) => {
   const { userId } = req.query;
   console.log('📋 GET /api/tasks - userId:', userId);
   
+  // ✅ CORREGIDO: Normalizar datos antes de enviar
+  const normalizedTasks = tasks.map(task => ({
+    ...task,
+    assignedTo: Array.isArray(task.assignedTo) 
+      ? task.assignedTo.map(id => parseInt(id))
+      : [parseInt(task.assignedTo)],
+    individualProgress: task.individualProgress || {}
+  }));
+  
   if (userId) {
-    const userTasks = tasks.filter(task => {
-      if (Array.isArray(task.assignedTo)) {
-        const isAssigned = task.assignedTo.includes(parseInt(userId));
-        console.log(`📝 Tarea "${task.title}": assignedTo=${JSON.stringify(task.assignedTo)}, userId=${userId}, isAssigned=${isAssigned}`);
-        return isAssigned;
-      }
-      const isAssigned = task.assignedTo == userId;
-      console.log(`📝 Tarea "${task.title}": assignedTo=${task.assignedTo}, userId=${userId}, isAssigned=${isAssigned}`);
+    const userIdNum = parseInt(userId);
+    const userTasks = normalizedTasks.filter(task => {
+      const isAssigned = task.assignedTo.includes(userIdNum);
+      console.log(`📝 Tarea "${task.title}": assignedTo=${JSON.stringify(task.assignedTo)}, userId=${userIdNum}, isAssigned=${isAssigned}`);
       return isAssigned;
     });
     
     console.log(`✅ Tareas filtradas para usuario ${userId}:`, userTasks.length);
     res.json(userTasks);
   } else {
-    console.log('📋 Todas las tareas:', tasks.length);
-    res.json(tasks);
+    console.log('📋 Todas las tareas:', normalizedTasks.length);
+    res.json(normalizedTasks);
   }
 });
 
-// Endpoint POST /api/tasks
+// ✅ CORREGIDO: Endpoint POST /api/tasks con validación
 app.post('/api/tasks', (req, res) => {
+  const { title, description, assignedTo, dueDate, assignedBy } = req.body;
+  
+  // ✅ CORREGIDO: Validar datos de entrada
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'El título de la tarea es requerido' });
+  }
+  
+  if (!assignedTo || (Array.isArray(assignedTo) && assignedTo.length === 0)) {
+    return res.status(400).json({ error: 'La tarea debe asignarse al menos a un empleado' });
+  }
+  
   const task = {
-    id: tasks.length + 1,
-    ...req.body,
-    assignedTo: Array.isArray(req.body.assignedTo) ? req.body.assignedTo : [req.body.assignedTo],
+    id: Date.now(), // ✅ CORREGIDO: Usar timestamp para IDs únicos
+    title: title.trim(),
+    description: description || '',
+    assignedTo: Array.isArray(assignedTo) ? assignedTo.map(id => parseInt(id)) : [parseInt(assignedTo)],
+    assignedBy: parseInt(assignedBy),
     individualProgress: {},
     createdAt: new Date(),
     status: 'pending',
-    progress: 0
+    progress: 0,
+    dueDate: dueDate ? new Date(dueDate) : null
   };
   
   tasks.push(task);
+  
+  console.log('✅ Tarea creada:', task.title, 'para usuarios:', task.assignedTo);
   io.emit('taskCreated', task);
+  
   res.json(task);
 });
 
@@ -277,7 +299,7 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 });
 
-// Endpoint para progreso individual
+// ✅ CORREGIDO: Endpoint para progreso individual con mejor manejo
 app.put('/api/tasks/:id/progress/:userId', (req, res) => {
   const taskId = parseInt(req.params.id);
   const userId = parseInt(req.params.userId);
@@ -285,22 +307,40 @@ app.put('/api/tasks/:id/progress/:userId', (req, res) => {
   
   console.log(`📊 Actualizando progreso: taskId=${taskId}, userId=${userId}, progress=${progress}`);
   
+  // ✅ CORREGIDO: Validar progreso
+  if (progress < 0 || progress > 100) {
+    return res.status(400).json({ error: 'El progreso debe estar entre 0 y 100' });
+  }
+  
   const taskIndex = tasks.findIndex(task => task.id === taskId);
   
   if (taskIndex !== -1) {
     const task = tasks[taskIndex];
     
-    if (!task.assignedTo.includes(userId)) {
+    // ✅ CORREGIDO: Normalizar assignedTo
+    const assignedTo = Array.isArray(task.assignedTo) 
+      ? task.assignedTo.map(id => parseInt(id))
+      : [parseInt(task.assignedTo)];
+    
+    if (!assignedTo.includes(userId)) {
       return res.status(403).json({ error: 'Usuario no asignado a esta tarea' });
+    }
+    
+    // ✅ CORREGIDO: Asegurar que individualProgress existe
+    if (!task.individualProgress) {
+      task.individualProgress = {};
     }
     
     task.individualProgress[userId] = progress;
     
-    const totalProgress = Object.values(task.individualProgress).reduce((sum, p) => sum + p, 0);
-    task.progress = Math.round(totalProgress / Object.keys(task.individualProgress).length);
+    // Calcular progreso general
+    const progressValues = Object.values(task.individualProgress);
+    const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
+    task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
     
-    const allCompleted = Object.values(task.individualProgress).every(p => p === 100);
-    const someInProgress = Object.values(task.individualProgress).some(p => p > 0 && p < 100);
+    // Determinar estado
+    const allCompleted = progressValues.every(p => p === 100);
+    const someInProgress = progressValues.some(p => p > 0 && p < 100);
     
     if (allCompleted) {
       task.status = 'completed';
@@ -330,7 +370,7 @@ app.get('/api/messages/:userId', (req, res) => {
 app.post('/api/messages', (req, res) => {
   console.log('📩 POST /api/messages recibido:', req.body);
   const message = {
-    id: messages.length + 1,
+    id: Date.now(), // ✅ CORREGIDO: Usar timestamp para IDs únicos
     ...req.body,
     timestamp: new Date(),
     read: false
@@ -348,7 +388,7 @@ app.get('/api/locations', (req, res) => {
   res.json(userLocations);
 });
 
-// Socket.io
+// ✅ CORREGIDO: Socket.io con mejor manejo de conexiones
 io.on('connection', (socket) => {
   console.log('Usuario conectado:', socket.id);
 
@@ -381,6 +421,8 @@ io.on('connection', (socket) => {
       }
     });
     
+    console.log(`📖 ${markedCount} mensajes marcados como leídos por usuario ${userId}`);
+    
     io.emit('messagesRead', { 
       readerId: userId, 
       senderId,
@@ -390,6 +432,8 @@ io.on('connection', (socket) => {
 
   socket.on('userViewingChat', (data) => {
     const { userId, partnerId, isViewing } = data;
+    console.log(`👀 Usuario ${userId} ${isViewing ? 'viendo' : 'dejó de ver'} chat con ${partnerId}`);
+    
     socket.broadcast.emit('chatViewingStatus', {
       userId,
       partnerId, 
@@ -409,13 +453,19 @@ io.on('connection', (socket) => {
     const task = tasks.find(t => t.id === data.taskId);
     if (task) {
       if (data.userId && data.progress !== undefined) {
+        // ✅ CORREGIDO: Asegurar que individualProgress existe
+        if (!task.individualProgress) {
+          task.individualProgress = {};
+        }
+        
         task.individualProgress[data.userId] = data.progress;
         
-        const totalProgress = Object.values(task.individualProgress).reduce((sum, p) => sum + p, 0);
-        task.progress = Math.round(totalProgress / Object.keys(task.individualProgress).length);
+        const progressValues = Object.values(task.individualProgress);
+        const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
+        task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
         
-        const allCompleted = Object.values(task.individualProgress).every(p => p === 100);
-        const someInProgress = Object.values(task.individualProgress).some(p => p > 0 && p < 100);
+        const allCompleted = progressValues.every(p => p === 100);
+        const someInProgress = progressValues.some(p => p > 0 && p < 100);
         
         if (allCompleted) {
           task.status = 'completed';
@@ -469,7 +519,10 @@ app.get('/api/debug', (req, res) => {
       const { password, ...userWithoutPassword } = user;
       return userWithoutPassword;
     }),
-    tasks,
+    tasks: tasks.map(task => ({
+      ...task,
+      assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [task.assignedTo]
+    })),
     messages,
     userLocations,
     onlineUsers
@@ -491,5 +544,6 @@ server.listen(PORT, () => {
   console.log(`📊 Usuarios: ${users.length}`);
   console.log(`📋 Tareas: ${tasks.length}`);
   console.log(`🌍 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug`);
 }); 
 Total archivos: 4 
