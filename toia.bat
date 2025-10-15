@@ -17,6 +17,9 @@ echo. >> "%ARCHIVO_SALIDA%"
 
 set ARCHIVOS_PROCESADOS=0
 
+:: Extensiones de imagen a excluir
+set "EXTENSIONES_IMAGEN=.jpg .jpeg .png .gif .bmp .tiff .tif .webp .svg .ico .raw .psd .ai .eps"
+
 :: Procesar archivos recursivamente pero excluir node_modules, .git y package-lock.json
 for /f "delims=" %%F in ('dir /s /b /a-d * ^| findstr /v /i "\\node_modules\\ \\.git\\ package-lock\.json"') do (
     if not "%%F"=="%~f0" (
@@ -31,7 +34,19 @@ for /f "delims=" %%F in ('dir /s /b /a-d * ^| findstr /v /i "\\node_modules\\ \\
             echo !ruta_relativa! >> "%ARCHIVO_SALIDA%"
             echo ================================= >> "%ARCHIVO_SALIDA%"
             echo. >> "%ARCHIVO_SALIDA%"
-            type "%%F" >> "%ARCHIVO_SALIDA%" 2>nul
+            
+            :: Verificar si es archivo de imagen
+            set "es_imagen=0"
+            for %%E in (%EXTENSIONES_IMAGEN%) do (
+                if /i "%%~xF"=="%%E" set "es_imagen=1"
+            )
+            
+            if !es_imagen!==1 (
+                echo [ARCHIVO DE IMAGEN - CONTENIDO NO MOSTRADO] >> "%ARCHIVO_SALIDA%"
+            ) else (
+                type "%%F" >> "%ARCHIVO_SALIDA%" 2>nul
+            )
+            
             set /a ARCHIVOS_PROCESADOS+=1
         )
     )

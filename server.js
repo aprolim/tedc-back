@@ -18,14 +18,14 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-// Datos en memoria (serán reemplazados por MongoDB)
+// Datos en memoria
 let users = [
   { 
     id: 1, 
     name: 'Administrador', 
     role: 'admin', 
     email: 'admin@empresa.com',
-    password: 'admin123', // ✅ AGREGADO: Password para login
+    password: 'admin123',
     department: 'Administración'
   },
   { 
@@ -54,15 +54,20 @@ let users = [
   }
 ];
 
+// Tareas de ejemplo
 let tasks = [
   { 
     id: 1, 
     title: 'Revisar informe mensual', 
     description: 'Revisar y aprobar el informe del mes anterior',
-    assignedTo: 2, // Juan Pérez
+    assignedTo: [2, 3],
     assignedBy: 1,
     status: 'in-progress',
     progress: 50,
+    individualProgress: {
+      2: 75,
+      3: 25
+    },
     createdAt: new Date(),
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
   },
@@ -70,10 +75,11 @@ let tasks = [
     id: 2, 
     title: 'Preparar presentación cliente', 
     description: 'Crear slides para la reunión del jueves',
-    assignedTo: 3, // María García
+    assignedTo: [3],
     assignedBy: 1,
     status: 'pending',
     progress: 0,
+    individualProgress: {},
     createdAt: new Date(),
     dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
   },
@@ -81,10 +87,13 @@ let tasks = [
     id: 3, 
     title: 'Desarrollar nueva funcionalidad', 
     description: 'Implementar el módulo de reportes en el sistema',
-    assignedTo: 4, // Carlos López
+    assignedTo: [4],
     assignedBy: 1,
     status: 'in-progress', 
     progress: 25,
+    individualProgress: {
+      4: 25
+    },
     createdAt: new Date(),
     dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
   }
@@ -95,13 +104,12 @@ let userLocations = {};
 let onlineUsers = {};
 let messageReadStatus = {};
 
-// ✅ NUEVO: Middleware para log de requests
 app.use((req, res, next) => {
   console.log(`📍 ${req.method} ${req.path}`, req.body || '');
   next();
 });
 
-// ✅ NUEVO: Endpoint de Login
+// Endpoint de Login
 app.post('/api/auth/login', (req, res) => {
   console.log('🔐 Intento de login:', req.body);
   
@@ -114,7 +122,6 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
   
-  // Buscar usuario por email
   const user = users.find(u => u.email === email);
   
   if (!user) {
@@ -125,7 +132,6 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
   
-  // ✅ Verificar contraseña (en producción usar bcrypt)
   if (user.password !== password) {
     console.log('❌ Contraseña incorrecta para:', email);
     return res.status(401).json({ 
@@ -134,62 +140,20 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
   
-  // ✅ Login exitoso
   console.log('✅ Login exitoso:', user.name);
   
-  // Remover password de la respuesta
   const { password: _, ...userWithoutPassword } = user;
   
   res.json({
     success: true,
     message: 'Login exitoso',
     user: userWithoutPassword,
-    token: `fake-jwt-token-${user.id}` // En producción usar JWT real
+    token: `fake-jwt-token-${user.id}`
   });
 });
 
-// ✅ NUEVO: Endpoint para verificar token (para futuro uso)
-app.get('/api/auth/verify', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Token no proporcionado' 
-    });
-  }
-  
-  // Verificación simple del token fake
-  const userId = token.replace('fake-jwt-token-', '');
-  const user = users.find(u => u.id === parseInt(userId));
-  
-  if (!user) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Token inválido' 
-    });
-  }
-  
-  const { password: _, ...userWithoutPassword } = user;
-  
-  res.json({
-    success: true,
-    user: userWithoutPassword
-  });
-});
-
-// ✅ NUEVO: Endpoint para logout (para futuro uso)
-app.post('/api/auth/logout', (req, res) => {
-  console.log('🚪 Logout request');
-  res.json({ 
-    success: true, 
-    message: 'Logout exitoso' 
-  });
-});
-
-// API Routes existentes
+// Endpoint para obtener usuarios
 app.get('/api/users', (req, res) => {
-  // ✅ MODIFICADO: Retornar usuarios sin password
   const usersWithoutPasswords = users
     .filter(user => user.role === 'employee')
     .map(user => {
@@ -200,41 +164,163 @@ app.get('/api/users', (req, res) => {
   res.json(usersWithoutPasswords);
 });
 
+// ✅ CORREGIDO: Endpoint GET /api/tasks - MEJORADO PARA NORMALIZAR TIPOS
 app.get('/api/tasks', (req, res) => {
   const { userId } = req.query;
+  console.log('📋 GET /api/tasks - userId:', userId);
+  
+  // ✅ CORREGIDO: Normalizar datos antes de enviar
+  const normalizedTasks = tasks.map(task => ({
+    ...task,
+    assignedTo: Array.isArray(task.assignedTo) 
+      ? task.assignedTo.map(id => parseInt(id))
+      : [parseInt(task.assignedTo)],
+    individualProgress: task.individualProgress || {}
+  }));
+  
   if (userId) {
-    res.json(tasks.filter(task => task.assignedTo == userId));
+    const userIdNum = parseInt(userId);
+    const userTasks = normalizedTasks.filter(task => {
+      const isAssigned = task.assignedTo.includes(userIdNum);
+      console.log(`📝 Tarea "${task.title}": assignedTo=${JSON.stringify(task.assignedTo)}, userId=${userIdNum}, isAssigned=${isAssigned}`);
+      return isAssigned;
+    });
+    
+    console.log(`✅ Tareas filtradas para usuario ${userId}:`, userTasks.length);
+    res.json(userTasks);
   } else {
-    res.json(tasks);
+    console.log('📋 Todas las tareas:', normalizedTasks.length);
+    res.json(normalizedTasks);
   }
 });
 
+// ✅ CORREGIDO: Endpoint POST /api/tasks con validación
 app.post('/api/tasks', (req, res) => {
+  const { title, description, assignedTo, dueDate, assignedBy } = req.body;
+  
+  // ✅ CORREGIDO: Validar datos de entrada
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'El título de la tarea es requerido' });
+  }
+  
+  if (!assignedTo || (Array.isArray(assignedTo) && assignedTo.length === 0)) {
+    return res.status(400).json({ error: 'La tarea debe asignarse al menos a un empleado' });
+  }
+  
   const task = {
-    id: tasks.length + 1,
-    ...req.body,
+    id: Date.now(), // ✅ CORREGIDO: Usar timestamp para IDs únicos
+    title: title.trim(),
+    description: description || '',
+    assignedTo: Array.isArray(assignedTo) ? assignedTo.map(id => parseInt(id)) : [parseInt(assignedTo)],
+    assignedBy: parseInt(assignedBy),
+    individualProgress: {},
     createdAt: new Date(),
     status: 'pending',
-    progress: 0
+    progress: 0,
+    dueDate: dueDate ? new Date(dueDate) : null
   };
+  
   tasks.push(task);
+  
+  console.log('✅ Tarea creada:', task.title, 'para usuarios:', task.assignedTo);
   io.emit('taskCreated', task);
+  
   res.json(task);
 });
 
+// Endpoint PUT /api/tasks/:id
 app.put('/api/tasks/:id', (req, res) => {
   const taskId = parseInt(req.params.id);
   const taskIndex = tasks.findIndex(task => task.id === taskId);
   
   if (taskIndex !== -1) {
-    tasks[taskIndex] = { ...tasks[taskIndex], ...req.body };
-    io.emit('taskUpdated', tasks[taskIndex]);
-    res.json(tasks[taskIndex]);
+    const updatedTask = { ...tasks[taskIndex], ...req.body };
+    
+    if (req.body.individualProgress) {
+      const individualProgress = req.body.individualProgress;
+      const totalProgress = Object.values(individualProgress).reduce((sum, progress) => sum + progress, 0);
+      updatedTask.progress = Math.round(totalProgress / Object.keys(individualProgress).length);
+      
+      const allCompleted = Object.values(individualProgress).every(progress => progress === 100);
+      const someInProgress = Object.values(individualProgress).some(progress => progress > 0 && progress < 100);
+      
+      if (allCompleted) {
+        updatedTask.status = 'completed';
+      } else if (someInProgress || updatedTask.progress > 0) {
+        updatedTask.status = 'in-progress';
+      } else {
+        updatedTask.status = 'pending';
+      }
+    }
+    
+    tasks[taskIndex] = updatedTask;
+    io.emit('taskUpdated', updatedTask);
+    res.json(updatedTask);
   } else {
     res.status(404).json({ error: 'Tarea no encontrada' });
   }
 });
 
+// ✅ CORREGIDO: Endpoint para progreso individual con mejor manejo
+app.put('/api/tasks/:id/progress/:userId', (req, res) => {
+  const taskId = parseInt(req.params.id);
+  const userId = parseInt(req.params.userId);
+  const { progress } = req.body;
+  
+  console.log(`📊 Actualizando progreso: taskId=${taskId}, userId=${userId}, progress=${progress}`);
+  
+  // ✅ CORREGIDO: Validar progreso
+  if (progress < 0 || progress > 100) {
+    return res.status(400).json({ error: 'El progreso debe estar entre 0 y 100' });
+  }
+  
+  const taskIndex = tasks.findIndex(task => task.id === taskId);
+  
+  if (taskIndex !== -1) {
+    const task = tasks[taskIndex];
+    
+    // ✅ CORREGIDO: Normalizar assignedTo
+    const assignedTo = Array.isArray(task.assignedTo) 
+      ? task.assignedTo.map(id => parseInt(id))
+      : [parseInt(task.assignedTo)];
+    
+    if (!assignedTo.includes(userId)) {
+      return res.status(403).json({ error: 'Usuario no asignado a esta tarea' });
+    }
+    
+    // ✅ CORREGIDO: Asegurar que individualProgress existe
+    if (!task.individualProgress) {
+      task.individualProgress = {};
+    }
+    
+    task.individualProgress[userId] = progress;
+    
+    // Calcular progreso general
+    const progressValues = Object.values(task.individualProgress);
+    const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
+    task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
+    
+    // Determinar estado
+    const allCompleted = progressValues.every(p => p === 100);
+    const someInProgress = progressValues.some(p => p > 0 && p < 100);
+    
+    if (allCompleted) {
+      task.status = 'completed';
+    } else if (someInProgress || task.progress > 0) {
+      task.status = 'in-progress';
+    } else {
+      task.status = 'pending';
+    }
+    
+    console.log(`✅ Progreso actualizado: "${task.title}" - progreso general: ${task.progress}%`);
+    io.emit('taskUpdated', task);
+    res.json(task);
+  } else {
+    res.status(404).json({ error: 'Tarea no encontrada' });
+  }
+});
+
+// Otros endpoints...
 app.get('/api/messages/:userId', (req, res) => {
   const userId = parseInt(req.params.userId);
   const userMessages = messages.filter(msg => 
@@ -246,40 +332,35 @@ app.get('/api/messages/:userId', (req, res) => {
 app.post('/api/messages', (req, res) => {
   console.log('📩 POST /api/messages recibido:', req.body);
   const message = {
-    id: messages.length + 1,
+    id: Date.now(), // ✅ CORREGIDO: Usar timestamp para IDs únicos
     ...req.body,
     timestamp: new Date(),
     read: false
   };
   messages.push(message);
-  console.log('📤 Emitiendo newMessage a todos los clientes');
   io.emit('newMessage', message);
   res.json(message);
 });
 
-// Nuevo endpoint para obtener estado de usuarios en línea
 app.get('/api/online-users', (req, res) => {
   res.json(onlineUsers);
 });
 
-// Endpoint para obtener ubicaciones
 app.get('/api/locations', (req, res) => {
   res.json(userLocations);
 });
 
-// Socket.io para comunicación en tiempo real
+// ✅ CORREGIDO: Socket.io con mejor manejo de conexiones
 io.on('connection', (socket) => {
   console.log('Usuario conectado:', socket.id);
 
-  // Evento cuando un usuario se identifica
   socket.on('userOnline', (userId) => {
     onlineUsers[userId] = {
       socketId: socket.id,
       lastSeen: new Date(),
       status: 'online'
     };
-    console.log(`🟢 Usuario ${userId} en línea - Online users:`, Object.keys(onlineUsers));
-    // ✅ Asegurar que se emite a TODOS los clientes
+    console.log(`🟢 Usuario ${userId} en línea`);
     io.emit('userStatusUpdate', { 
       userId, 
       status: 'online', 
@@ -288,31 +369,22 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Evento para marcar mensajes como leídos cuando son VISIBLES en pantalla
   socket.on('markMessagesAsRead', (data) => {
     const { userId, senderId, messageIds } = data;
-    console.log(`📖 Usuario ${userId} marcando como leídos mensajes de ${senderId}`);
-    console.log(`📋 Mensajes específicos:`, messageIds);
     
     let markedCount = 0;
-    
-    // CORREGIDO: Solo marcar mensajes donde el senderId es el remitente original
-    // y el userId es el receptor que está leyendo
     messages.forEach(msg => {
       if (messageIds && messageIds.includes(msg.id)) {
-        // Verificar que el mensaje sea del senderId y para el userId
         if (msg.senderId === senderId && msg.receiverId === userId && !msg.read) {
           msg.read = true;
           msg.readAt = new Date();
           markedCount++;
-          console.log(`✅ Mensaje ${msg.id} marcado como leído correctamente`);
         }
       }
     });
     
-    console.log(`✅ ${markedCount} mensajes marcados como leídos`);
+    console.log(`📖 ${markedCount} mensajes marcados como leídos por usuario ${userId}`);
     
-    // Notificar al remitente original que sus mensajes fueron leídos
     io.emit('messagesRead', { 
       readerId: userId, 
       senderId,
@@ -320,12 +392,10 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Nuevo evento para notificar cuando un usuario está viendo el chat
   socket.on('userViewingChat', (data) => {
     const { userId, partnerId, isViewing } = data;
     console.log(`👀 Usuario ${userId} ${isViewing ? 'viendo' : 'dejó de ver'} chat con ${partnerId}`);
     
-    // Notificar al partner sobre el estado de visualización
     socket.broadcast.emit('chatViewingStatus', {
       userId,
       partnerId, 
@@ -344,17 +414,35 @@ io.on('connection', (socket) => {
   socket.on('taskProgress', (data) => {
     const task = tasks.find(t => t.id === data.taskId);
     if (task) {
-      task.progress = data.progress;
-      task.status = data.progress === 100 ? 'completed' : 'in-progress';
+      if (data.userId && data.progress !== undefined) {
+        // ✅ CORREGIDO: Asegurar que individualProgress existe
+        if (!task.individualProgress) {
+          task.individualProgress = {};
+        }
+        
+        task.individualProgress[data.userId] = data.progress;
+        
+        const progressValues = Object.values(task.individualProgress);
+        const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
+        task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
+        
+        const allCompleted = progressValues.every(p => p === 100);
+        const someInProgress = progressValues.some(p => p > 0 && p < 100);
+        
+        if (allCompleted) {
+          task.status = 'completed';
+        } else if (someInProgress || task.progress > 0) {
+          task.status = 'in-progress';
+        }
+      }
+      
       io.emit('taskUpdated', task);
     }
   });
 
-  // Manejar desconexión
   socket.on('disconnect', () => {
     console.log('Usuario desconectado:', socket.id);
     
-    // Encontrar y marcar usuario como offline
     for (const [userId, userData] of Object.entries(onlineUsers)) {
       if (userData.socketId === socket.id) {
         onlineUsers[userId] = {
@@ -363,7 +451,6 @@ io.on('connection', (socket) => {
           lastSeen: new Date()
         };
         console.log(`🔴 Usuario ${userId} desconectado`);
-        // ✅ Asegurar que se emite a TODOS los clientes
         io.emit('userStatusUpdate', { 
           userId, 
           status: 'offline', 
@@ -376,7 +463,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Endpoint de salud para verificar que el servidor está funcionando
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -384,45 +471,30 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     users: users.length,
     tasks: tasks.length,
-    messages: messages.length,
-    onlineUsers: Object.keys(onlineUsers).filter(id => onlineUsers[id].status === 'online').length
+    messages: messages.length
   });
 });
 
-// ✅ NUEVO: Endpoint para obtener información de usuarios (para login)
-app.get('/api/auth/users-info', (req, res) => {
-  // Retornar información básica de usuarios para mostrar en login
-  const usersInfo = users.map(user => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    department: user.department
-  }));
-  
-  res.json(usersInfo);
-});
-
-// Ruta de prueba para ver todos los datos
 app.get('/api/debug', (req, res) => {
   res.json({
     users: users.map(user => {
       const { password, ...userWithoutPassword } = user;
       return userWithoutPassword;
     }),
-    tasks,
+    tasks: tasks.map(task => ({
+      ...task,
+      assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [task.assignedTo]
+    })),
     messages,
     userLocations,
     onlineUsers
   });
 });
 
-// Manejo de errores 404
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
-// Manejo de errores global
 app.use((error, req, res, next) => {
   console.error('Error del servidor:', error);
   res.status(500).json({ error: 'Error interno del servidor' });
@@ -431,15 +503,8 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-  console.log(`🔐 Sistema de login ACTIVADO`);
   console.log(`📊 Usuarios: ${users.length}`);
   console.log(`📋 Tareas: ${tasks.length}`);
-  console.log(`💬 Mensajes: ${messages.length}`);
   console.log(`🌍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`🔧 Debug: http://localhost:${PORT}/api/debug`);
-  console.log(`🔑 Credenciales de prueba:`);
-  console.log(`   👑 Admin: admin@empresa.com / admin123`);
-  console.log(`   👨‍💼 Juan: juan@empresa.com / juan123`);
-  console.log(`   👩‍💼 María: maria@empresa.com / maria123`);
-  console.log(`   👨‍💻 Carlos: carlos@empresa.com / carlos123`);
+  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug`);
 });
