@@ -261,7 +261,7 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 });
 
-// ✅ CORREGIDO: Endpoint para progreso individual con mejor manejo
+// ✅ CORREGIDO COMPLETAMENTE: Endpoint para progreso individual con cálculo CORRECTO
 app.put('/api/tasks/:id/progress/:userId', (req, res) => {
   const taskId = parseInt(req.params.id);
   const userId = parseInt(req.params.userId);
@@ -295,24 +295,52 @@ app.put('/api/tasks/:id/progress/:userId', (req, res) => {
     
     task.individualProgress[userId] = progress;
     
-    // Calcular progreso general
+    // ✅ CORREGIDO COMPLETAMENTE: Cálculo CORRECTO del progreso y estado
     const progressValues = Object.values(task.individualProgress);
     const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
-    task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
+    const averageProgress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
     
-    // Determinar estado
-    const allCompleted = progressValues.every(p => p === 100);
-    const someInProgress = progressValues.some(p => p > 0 && p < 100);
+    // ✅ NUEVA LÓGICA CORRECTA: Verificar si TODOS los asignados completaron (100%)
+    const allAssignedUsers = assignedTo;
     
+    // ✅ CORREGIDO: Verificar que TODOS los asignados tengan 100%, no solo los que tienen progreso
+    const allCompleted = allAssignedUsers.every(userId => 
+      task.individualProgress[userId] === 100
+    );
+    
+    // ✅ CORREGIDO: Contar cuántos han completado para logs informativos
+    const completedCount = allAssignedUsers.filter(userId => 
+      task.individualProgress[userId] === 100
+    ).length;
+    
+    const totalAssigned = allAssignedUsers.length;
+    
+    console.log(`📊 Cálculo de progreso:`);
+    console.log(`   - Asignados: ${allAssignedUsers.join(', ')}`);
+    console.log(`   - Progresos individuales:`, task.individualProgress);
+    console.log(`   - Completados: ${completedCount}/${totalAssigned}`);
+    console.log(`   - Promedio: ${averageProgress}%`);
+    console.log(`   - Todos completados: ${allCompleted}`);
+    
+    // ✅ DETERMINAR ESTADO BASADO EN COMPLETACIÓN REAL
     if (allCompleted) {
+      // Solo marcar como completado si TODOS los asignados han completado (100%)
       task.status = 'completed';
-    } else if (someInProgress || task.progress > 0) {
+      task.progress = 100;
+      console.log(`✅ Tarea COMPLETADA: Todos los asignados (${completedCount}/${totalAssigned}) han terminado`);
+    } else if (averageProgress > 0 || progressValues.length > 0) {
+      // Tarea en progreso si hay algún progreso
       task.status = 'in-progress';
+      task.progress = averageProgress;
+      console.log(`🔄 Tarea EN PROGRESO: ${completedCount}/${totalAssigned} completados, promedio ${averageProgress}%`);
     } else {
+      // Tarea pendiente
       task.status = 'pending';
+      task.progress = 0;
+      console.log(`⏳ Tarea PENDIENTE: Sin progreso`);
     }
     
-    console.log(`✅ Progreso actualizado: "${task.title}" - progreso general: ${task.progress}%`);
+    console.log(`✅ Progreso actualizado: "${task.title}" - progreso general: ${task.progress}%, estado: ${task.status}`);
     io.emit('taskUpdated', task);
     res.json(task);
   } else {
@@ -422,17 +450,32 @@ io.on('connection', (socket) => {
         
         task.individualProgress[data.userId] = data.progress;
         
+        // ✅ CORREGIDO: Replicar la misma lógica de cálculo
         const progressValues = Object.values(task.individualProgress);
         const totalProgress = progressValues.reduce((sum, p) => sum + p, 0);
-        task.progress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
+        const averageProgress = progressValues.length > 0 ? Math.round(totalProgress / progressValues.length) : 0;
         
-        const allCompleted = progressValues.every(p => p === 100);
-        const someInProgress = progressValues.some(p => p > 0 && p < 100);
+        const assignedTo = Array.isArray(task.assignedTo) 
+          ? task.assignedTo.map(id => parseInt(id))
+          : [parseInt(task.assignedTo)];
         
-        if (allCompleted) {
+        const usersWithProgress = assignedTo.filter(userId => 
+          task.individualProgress[userId] !== undefined
+        );
+        const allCompleted = usersWithProgress.length > 0 && 
+                            usersWithProgress.every(userId => 
+                              task.individualProgress[userId] === 100
+                            );
+        
+        if (allCompleted && usersWithProgress.length === assignedTo.length) {
           task.status = 'completed';
-        } else if (someInProgress || task.progress > 0) {
+          task.progress = 100;
+        } else if (averageProgress > 0 || progressValues.length > 0) {
           task.status = 'in-progress';
+          task.progress = averageProgress;
+        } else {
+          task.status = 'pending';
+          task.progress = 0;
         }
       }
       
