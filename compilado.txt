@@ -138,7 +138,24 @@ let tasks = [
 ];
 
 let messages = [];
-let userLocations = {};
+// Después de definir userLocations en server.js, reemplaza con:
+let userLocations = {
+  2: {
+    latitude: -17.3386 + (Math.random() - 0.5) * 0.02, // Alrededor de Hotel Regina
+    longitude: -66.2158 + (Math.random() - 0.5) * 0.02,
+    lastUpdate: new Date()
+  },
+  3: {
+    latitude: -17.3386 + (Math.random() - 0.5) * 0.02,
+    longitude: -66.2158 + (Math.random() - 0.5) * 0.02,
+    lastUpdate: new Date()
+  },
+  4: {
+    latitude: -17.3386 + (Math.random() - 0.5) * 0.02,
+    longitude: -66.2158 + (Math.random() - 0.5) * 0.02,
+    lastUpdate: new Date()
+  }
+};
 let onlineUsers = {};
 let messageReadStatus = {};
 
